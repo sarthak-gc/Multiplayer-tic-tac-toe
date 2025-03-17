@@ -76,6 +76,8 @@ ws.on("connection", (socket, request) => {
   if (connections > 2) {
     console.log("Maximum number of connections reached. Closing connection.");
     socket.close();
+    connections--;
+    console.log(connections);
     return;
   }
   console.log("Connection established");
@@ -110,6 +112,9 @@ ws.on("connection", (socket, request) => {
 
   socket.on("close", () => {
     console.log("Connection closed");
+    connections--;
+
+    // board = Array(9).fill("")
   });
 
   socket.on("error", (err) => {
