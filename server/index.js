@@ -69,7 +69,15 @@ const handleMove = (symbol, positionToMark) => {
     return { nextTurn: "none", winner: result.winner };
   }
 };
+
+let connections = 0;
 ws.on("connection", (socket, request) => {
+  connections++;
+  if (connections > 2) {
+    console.log("Maximum number of connections reached. Closing connection.");
+    socket.close();
+    return;
+  }
   console.log("Connection established");
   const sendResponse = (nextTurn, winner, message) => {
     socket.send(
