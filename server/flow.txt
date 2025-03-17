@@ -1,0 +1,42 @@
+only considering 2 players joining the game
+
+player 1 connect
+player 2 connect
+
+load the game
+
+until server sends a winner or draw msg
+  player 1 moves
+  sends playerinfo and move details to the server
+      server calculates 
+      receives player turn and gamestatus from server
+
+  player 2 moves 
+  sends playerinfo and move details to the server
+      server calculates
+      receives player turn and gamestatus from server
+
+
+
+server calculations : 
+
+  receives player information and move
+    until draw or winner :
+      if move is valid :
+        add move to the board
+        check if there is any winner
+        change player's turn 
+      invalid move :
+        no change in player's turn 
+        send invalid move info 
+
+    if no winner :
+      send signals to continue to the client
+    if winner :
+      send winner info to the client
+    if draw :
+      stop the game and send msg about draw
+
+
+
+// maybe try this in client side ? 
