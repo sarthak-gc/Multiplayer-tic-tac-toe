@@ -2,123 +2,298 @@ import { WebSocketServer } from "ws";
 import http from "http";
 
 const httpServer = http.createServer((req, res) => {
-  res.end("Server running");
+  res.end("Server running1234");
 });
 const ws = new WebSocketServer({ server: httpServer });
 
 let board = Array(9).fill("");
 let counter = 0;
-
 let currentPlayer = "X";
 let winner = null;
+
+let players = {
+  X: null,
+  O: null,
+};
+let gameStatus = "waiting"; // "playing finished"
 const winningPatterns = [
   // horizontal
   [0, 1, 2],
   [3, 4, 5],
   [6, 7, 8],
-
   // vertical
   [0, 3, 6],
-  [0, 4, 8],
   [1, 4, 7],
-
-  //diagonal
   [2, 5, 8],
+  //diagonal
+  [0, 4, 8],
   [2, 4, 6],
 ];
+
 const checkGameStatus = () => {
   for (let i = 0; i < winningPatterns.length; i++) {
     const [a, b, c] = winningPatterns[i];
 
     if (board[a] === board[b] && board[b] === board[c] && board[a] !== "") {
       winner = board[a];
-      return { winner };
+      gameStatus = "finished";
+      return {
+        board,
+        nextTurn: null,
+        winner,
+        message: `Game is completed, ${winner} wins!`,
+        gameStatus,
+      };
     }
   }
 
   if (counter === 9) {
-    return "Draw";
+    gameStatus = "finished";
+    return {
+      board,
+      nextTurn: null,
+      winner: null,
+      message: "Game is drawn, no winners",
+      gameStatus,
+    };
   }
-  return "Continue";
+
+  return {
+    board,
+    nextTurn: currentPlayer,
+    winner: null,
+    message: "continue with the game",
+    gameStatus,
+  };
 };
 
 const markOnBoard = (symbol, positionToMark) => {
-  if (position < 0 || position > 8 || board[position]) {
-    return "Invalid Move";
+  if (gameStatus === "finished" || counter === 9) {
+    return {
+      board,
+      nextTurn: null,
+      winner: winner || null,
+      message: winner
+        ? `Game is completed, ${winner} wins!`
+        : "Game is drawn, no winners",
+      gameStatus,
+    };
+  }
+
+  if (positionToMark < 0 || positionToMark > 8 || board[positionToMark]) {
+    return {
+      board,
+      nextTurn: currentPlayer,
+      winner: null,
+      message: "Invalid Move",
+      gameStatus,
+    };
   }
 
   board[positionToMark] = symbol;
   counter++;
+  currentPlayer = currentPlayer === "X" ? "O" : "X";
   return checkGameStatus();
 };
 
-const handleMove = (symbol, positionToMark) => {
-  let result = markOnBoard(symbol, positionToMark);
-  if (result === "Continue") {
-    currentPlayer = currentPlayer === "X" ? "O" : "X";
-    return { nextTurn: currentPlayer, winner: "none" };
-  } else if (result === "Draw") {
-    return { nextTurn: "none", winner: "none" };
-  } else if (result === "Invalid Move") {
+const handleMove = (symbol, positionToMark, socket) => {
+  if (gameStatus !== "playing") {
     return {
+      board,
       nextTurn: currentPlayer,
-      winner: "none",
-      message: "Invalid move. Try again!",
+      winner: null,
+      message: "Game is not in progress",
+      gameStatus,
     };
-  } else {
-    return { nextTurn: "none", winner: result.winner };
   }
+
+  if (symbol !== currentPlayer) {
+    return {
+      board,
+      nextTurn: currentPlayer,
+      winner: null,
+      message: "Not your turn",
+      gameStatus,
+    };
+  }
+
+  if (players[symbol] !== socket) {
+    return {
+      board,
+      nextTurn: currentPlayer,
+      winner: null,
+      message: "Unauthorized move",
+      gameStatus,
+    };
+  }
+  return markOnBoard(symbol, positionToMark);
 };
 
-let connections = 0;
-ws.on("connection", (socket, request) => {
-  connections++;
-  if (connections > 2) {
-    console.log("Maximum number of connections reached. Closing connection.");
-    socket.close();
-    connections--;
-    console.log(connections);
-    return;
-  }
-  console.log("Connection established");
-  const sendResponse = (nextTurn, winner, message) => {
-    socket.send(
+const resetGame = () => {
+  board = Array(9).fill("");
+  counter = 0;
+  currentPlayer = "X";
+  winner = null;
+  gameStatus = players.X && players.O ? "playing" : "waiting";
+
+  return {
+    board,
+    nextTurn: currentPlayer,
+    winner: null,
+    message: gameStatus === "playing" ? "Game started" : "Waiting for players",
+    gameStatus,
+  };
+};
+
+const broadcast = (data) => {
+  if (players.X && players.X.readyState === 1) {
+    players.X.send(
       JSON.stringify({
-        nextTurn,
-        winner,
-        message,
+        ...data,
+        yourSymbol: "X",
       })
     );
-  };
+  }
+
+  if (players.O && players.O.readyState === 1) {
+    players.O.send(
+      JSON.stringify({
+        ...data,
+        yourSymbol: "O",
+      })
+    );
+  }
+
+  ws.clients.forEach((client) => {
+    if (
+      client !== players.X &&
+      client !== players.O &&
+      client.readyState === 1
+    ) {
+      console.log(client);
+      client.send(
+        JSON.stringify({
+          ...data,
+          yourSymbol: "spectator",
+        })
+      );
+    }
+  });
+};
+
+let connections = new Set();
+ws.on("connection", (socket, request) => {
+  connections.add(socket);
+  console.log("Connection established, total connections:", connections.size);
+  let assignedSymbol = "spectator";
+
+  if (!players.X) {
+    players.X = socket;
+    assignedSymbol = "X";
+  } else if (!players.O) {
+    players.O = socket;
+    assignedSymbol = "O";
+    if (gameStatus === "waiting" && players.X) {
+      gameStatus = "playing";
+    }
+  } else {
+    console.log("Spectator joined");
+  }
+  if (players.X && players.O && gameStatus === "waiting") {
+    gameStatus = "playing";
+  }
+  socket.send(
+    JSON.stringify({
+      board,
+      nextTurn: currentPlayer,
+      winner,
+      message:
+        gameStatus === "playing" ? "Game in progress" : "Waiting for players",
+      gameStatus,
+      yourSymbol: assignedSymbol,
+    })
+  );
+
+  if (gameStatus === "playing" && players.X && players.O) {
+    broadcast({
+      board,
+      nextTurn: currentPlayer,
+      winner,
+      message: "Game started! X goes first",
+      gameStatus,
+    });
+  }
 
   socket.on("message", (data) => {
-    data = JSON.parse(data);
-    let result = handleMove(data.player, data.positionToMark);
+    try {
+      const parsedData = JSON.parse(data);
+      console.log("Received:", parsedData);
+      if (parsedData.action === "reset") {
+        const newState = resetGame();
+        broadcast(newState);
+        return;
+      }
 
-    if (result === "Invalid Move") {
-      sendResponse(data.player, "none", "Invalid move. Try again!");
-      return;
-    }
-
-    const { winner } = result === "Draw" ? { winner: "none" } : result;
-
-    if (result === "Draw") {
-      sendResponse("none", "none", "Game Is Draw");
-    } else {
-      const nextPlayer = data.player === "X" ? "O" : "X";
-      sendResponse(nextPlayer, winner, `Player ${data.player} won The game`);
+      if (parsedData.action === "move") {
+        const result = handleMove(
+          parsedData.player,
+          parsedData.positionToMark,
+          socket
+        );
+        console.log("Game result:", result);
+        broadcast(result);
+        return;
+      }
+    } catch (error) {
+      console.error("Error processing message:", error);
+      socket.send(
+        JSON.stringify({
+          error: "Invalid message format",
+          board,
+          nextTurn: currentPlayer,
+          winner,
+          message: "Error occurred",
+          gameStatus,
+        })
+      );
     }
   });
 
   socket.on("close", () => {
     console.log("Connection closed");
-    connections--;
+    connections.delete(socket);
 
-    // board = Array(9).fill("")
+    if (players.X === socket) {
+      console.log("Player X disconnected. You won");
+      players.X = null;
+
+      broadcast({
+        board,
+        nextTurn: null,
+        winner: null,
+        message: "Player X disconnected. You won",
+        gameStatus: "finished",
+      });
+
+      gameStatus = "finished";
+    } else if (players.O === socket) {
+      console.log("Player O disconnected. You won");
+      players.O = null;
+
+      broadcast({
+        board: Array(9).fill(""),
+        nextTurn: null,
+        winner: null,
+        message: "Player O disconnected. You won",
+        gameStatus: "finished",
+      });
+      gameStatus = "finished";
+    }
   });
 
   socket.on("error", (err) => {
     console.log("Error: ", err);
+    connections.delete(socket);
   });
 });
 
