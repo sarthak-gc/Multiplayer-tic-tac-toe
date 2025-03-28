@@ -1,6 +1,8 @@
 import { WebSocketServer } from "ws";
 import http from "http";
-
+import dotenv from "dotenv";
+dotenv.config();
+console.log(process.env.PORT);
 const httpServer = http.createServer((req, res) => {
   res.end("Server running1234");
 });
@@ -297,7 +299,7 @@ ws.on("connection", (socket, request) => {
   });
 });
 
-const port = 3000;
+const port = process.env.PORT || 4000;
 httpServer.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
